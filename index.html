@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Lịch Làm Việc Tuần</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    .gradient-bg { background: linear-gradient(135deg, #f0f4ff 0%, #e0e7ff 100%); }
+    .card { background: white; border-radius: 1rem; box-shadow: 0 6px 16px rgba(0,0,0,0.08); }
+    .btn { transition: all 0.2s ease-in-out; }
+    .btn:active { transform: scale(0.97); }
+    table tr:nth-child(even) { background-color: #f9fafb; }
+  </style>
+</head>
+<body class="gradient-bg min-h-screen flex items-center justify-center p-4">
+
+  <div class="w-full max-w-2xl card p-6 space-y-6">
+    <!-- Header -->
+    <div class="text-center">
+      <h1 class="text-2xl font-bold text-indigo-600">Lịch Làm Việc Tuần</h1>
+      <p class="text-gray-500 text-sm mt-1">Nhập ca làm cho từng ngày, có thể nhập nhiều ca (dùng dấu <code>;</code>)</p>
+    </div>
+
+    <!-- Input Section -->
+    <div id="week-inputs" class="grid grid-cols-1 gap-4"></div>
+
+    <!-- Button -->
+    <div>
+      <button id="calculate-btn" 
+        class="btn w-full px-4 py-3 bg-indigo-600 text-white font-semibold rounded-lg focus:outline-none focus:ring-4 focus:ring-indigo-300">
+        📅 Tính Lịch Tuần
+      </button>
+    </div>
+
+    <!-- Result Section -->
+    <div id="result-container" class="hidden">
+      <div class="overflow-x-auto rounded-lg mt-4">
+        <table class="min-w-full text-sm text-gray-700">
+          <thead class="bg-indigo-100">
+            <tr>
+              <th class="py-2 px-3 text-left">Thứ</th>
+              <th class="py-2 px-3 text-left">Mã Ca</th>
+              <th class="py-2 px-3 text-center">Giờ Vào</th>
+              <th class="py-2 px-3 text-center">Giờ Ra</th>
+              <th class="py-2 px-3 text-center">Tổng Giờ</th>
+            </tr>
+          </thead>
+          <tbody id="result-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const baseShifts = {
+      'HC': { start: 7.5, end: 15.5 },
+      'A':  { start: 22, end: 30 }, // 22h - 6h hôm sau
+      'X':  { start: 14, end: 22 },
+      'S':  { start: 6, end: 14 }
+    };
+
+    const daysOfWeek = [
+      { id: 'mon', name: 'Thứ Hai' },
+      { id: 'tue', name: 'Thứ Ba' },
+      { id: 'wed', name: 'Thứ Tư' },
+      { id: 'thu', name: 'Thứ Năm' },
+      { id: 'fri', name: 'Thứ Sáu' },
+      { id: 'sat', name: 'Thứ Bảy' },
+      { id: 'sun', name: 'Chủ Nhật' }
+    ];
+
+    const weekInputsContainer = document.getElementById('week-inputs');
+    const calculateBtn = document.getElementById('calculate-btn');
+    const resultContainer = document.getElementById('result-container');
+    const resultTbody = document.getElementById('result-tbody');
+
+    function createInputFields() {
+      daysOfWeek.forEach(day => {
+        const div = document.createElement('div');
+        div.innerHTML = `
+          <label for="${day.id}-input" class="block text-sm font-medium text-gray-700 mb-1">${day.name}</label>
+          <input type="text" id="${day.id}-input" placeholder="Ví dụ: S; 1-X-3"
+            class="w-full px-3 py-3 border border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 text-base">
+        `;
+        weekInputsContainer.appendChild(div);
+      });
+    }
+
+    function formatTime(decimalHours) {
+      const hours = Math.floor(decimalHours % 24);
+      const minutes = Math.round((decimalHours - Math.floor(decimalHours)) * 60);
+      return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+    }
+
+    function parseShift(input) {
+      const cleanInput = input.trim().toUpperCase().replace(',', '.');
+      if (!cleanInput) return null;
+      const regex = /^(\d+\.?\d*)?(-)?([A-Z]{1,2})(-)?(\d+\.?\d*)?$/;
+      const match = regex.exec(cleanInput);
+      if (!match) return { error: "Sai định dạng" };
+      const [, pre, preDash, code, sufDash, suf] = match;
+      if (!baseShifts[code]) return { error: `Ca '${code}' không tồn tại` };
+      let { start, end } = { ...baseShifts[code] };
+      if (pre) start += preDash ? parseFloat(pre) : -parseFloat(pre);
+      if (suf) end += sufDash ? -parseFloat(suf) : parseFloat(suf);
+      if (start >= end) return { error: "Giờ vào sau giờ ra" };
+      return { start, end, duration: end - start, error: null };
+    }
+
+    function calculateWeek() {
+      resultTbody.innerHTML = '';
+      let totalWeekHours = 0;
+
+      daysOfWeek.forEach(day => {
+        const inputEl = document.getElementById(`${day.id}-input`);
+        const val = inputEl.value.trim();
+        if (!val) {
+          resultTbody.innerHTML += `
+            <tr class="bg-gray-50"><td class="py-2 px-3">${day.name}</td><td colspan="4" class="italic text-gray-400">Nghỉ</td></tr>`;
+          return;
+        }
+
+        const parts = val.split(";").map(s => s.trim()).filter(Boolean);
+        let dailyTotal = 0; let firstRow = true;
+        parts.forEach(p => {
+          const res = parseShift(p);
+          if (res.error) {
+            resultTbody.innerHTML += `
+              <tr class="bg-red-50"><td>${firstRow ? day.name : ""}</td><td>${p}</td><td colspan="3" class="text-red-600">${res.error}</td></tr>`;
+          } else {
+            dailyTotal += res.duration;
+            const h = Math.floor(res.duration), m = Math.round((res.duration - h) * 60);
+            const dur = `${h}h ${m>0?m+'p':''}`;
+            resultTbody.innerHTML += `
+              <tr><td>${firstRow ? day.name : ""}</td><td>${p}</td><td class="text-center">${formatTime(res.start)}</td><td class="text-center">${formatTime(res.end)}</td><td class="text-center">${dur}</td></tr>`;
+          }
+          firstRow = false;
+        });
+        if (parts.length > 1 && dailyTotal > 0) {
+          const h = Math.floor(dailyTotal), m = Math.round((dailyTotal - h) * 60);
+          const dur = `${h}h ${m>0?m+'p':''}`;
+          resultTbody.innerHTML += `<tr class="bg-indigo-50 font-medium"><td></td><td colspan="3" class="text-right">Tổng ngày</td><td class="text-center">${dur}</td></tr>`;
+        }
+        totalWeekHours += dailyTotal;
+      });
+
+      const h = Math.floor(totalWeekHours), m = Math.round((totalWeekHours - h) * 60);
+      const totalText = `${h} giờ ${m>0?m+' phút':''}`;
+      resultTbody.innerHTML += `<tr class="bg-indigo-100 font-bold"><td colspan="4" class="text-right">Tổng tuần</td><td class="text-center">${totalText}</td></tr>`;
+
+      resultContainer.classList.remove('hidden');
+    }
+
+    document.addEventListener('DOMContentLoaded', createInputFields);
+    calculateBtn.addEventListener('click', calculateWeek);
+  </script>
+</body>
+</html>
